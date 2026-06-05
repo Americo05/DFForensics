@@ -108,7 +108,15 @@ ENV PATH="/opt/venv/bin:$PATH" \
 
 # Run as a non-root user. Most production deployments require it, and it
 # keeps the blast radius small if uploaded media triggers a parser CVE.
-RUN useradd --create-home --uid 1000 engine
+RUN useradd --create-home --uid 1000 engine \
+    # Pre-create the directories that get mounted as named volumes in
+    # docker-compose.yml (hf-cache, history bind mount) with engine
+    # ownership. Otherwise Docker creates the mount points as root on
+    # first use and the engine user can't write — manifesting as
+    # `PermissionError at /home/engine/.cache/huggingface/hub` when
+    # transformers.pipeline tries to download the dima806 ViT.
+    && mkdir -p /home/engine/.cache/huggingface /home/engine/.deepfake-forensics \
+    && chown -R engine:engine /home/engine
 WORKDIR /app
 
 # Copy engine source. The .dockerignore at the project root excludes
