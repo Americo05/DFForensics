@@ -54,14 +54,25 @@ services:
       # so the in-container target is /home/engine/.deepfake-forensics — that's
       # where Path.home() resolves for the Python process.
       - "${HOME:-${USERPROFILE}}/.deepfake-forensics:/home/engine/.deepfake-forensics"
-    # Health check probes /health every 30 s after a 60 s start grace
-    # period (model loading + first MTCNN warm-up dominate cold start).
+      # Named volume for the Hugging Face cache. The dima806 ViT (~340 MB)
+      # downloads from HF on first /api/analyze request; without this volume
+      # the model is re-downloaded on every `docker compose down -v` and the
+      # 5-minute healthcheck grace period below can easily expire while it
+      # crawls down over a slow connection. With the volume, subsequent
+      # starts skip the download entirely.
+      - hf-cache:/home/engine/.cache/huggingface
+    # Health check probes /health every 30 s after a generous start grace
+    # period. First-run cold start dominates timing:
+    #   • dima806 ViT download    ~340 MB (1-5 min on residential broadband)
+    #   • MTCNN P-Net warm-up     ~5 s
+    #   • Pyspy/transformers init ~10 s
+    # 300 s grace covers slow connections; once cached, real startup is <60 s.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\" || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 5
+      start_period: 300s
 
   frontend:
     build:
@@ -84,3 +95,11 @@ services:
       # they open the dashboard before models finish loading.
       engine:
         condition: service_healthy
+
+# Named volumes — managed by Docker, persist across `docker compose down`
+# (but not `docker compose down -v`, which is the intended escape hatch
+# when you want a true clean slate).
+volumes:
+  # Hugging Face model cache for the dima806 ViT and the WavLM audio
+  # deepfake model. Seeded on first analysis, reused on every restart.
+  hf-cache:
