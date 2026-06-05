@@ -50,10 +50,22 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir torch torchvision \
         --index-url https://download.pytorch.org/whl/cpu
 
-# Now the rest of the requirements. Filter out torch/torchvision so pip
-# doesn't try to "fix" the CPU build we just installed.
+# Now the rest of the requirements.
+#
+# Filter out torch/torchvision (we just installed the CPU build above; pip
+# would otherwise try to "fix" it with the GPU build from the default
+# index) AND facenet-pytorch (next paragraph for why).
+#
+# facenet-pytorch 2.6.0 declares `numpy<2.0` in its metadata, but the rest
+# of this requirements set pins numpy 2.4.4. The combination works in
+# practice — facenet-pytorch doesn't actually use the numpy APIs that
+# changed in 2.x — but pip's resolver (24+) refuses to install both.
+# Installing facenet-pytorch with --no-deps bypasses the stale upper bound;
+# its real runtime dependencies (torch, torchvision, pillow, requests,
+# tqdm) are all covered by other lines in requirements.txt anyway.
 COPY requirements.txt .
-RUN grep -ivE '^(torch|torchvision)==' requirements.txt > /tmp/req-no-torch.txt \
+RUN grep -ivE '^(torch|torchvision|facenet-pytorch)==' requirements.txt > /tmp/req-no-torch.txt \
+    && pip install --no-cache-dir --no-deps facenet-pytorch==2.6.0 \
     && pip install --no-cache-dir -r /tmp/req-no-torch.txt \
     # h5py is needed by the weight downloader (next stage) but isn't in the
     # frozen requirements yet — install explicitly.
