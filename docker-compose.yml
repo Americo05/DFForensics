@@ -62,17 +62,20 @@ services:
       # starts skip the download entirely.
       - hf-cache:/home/engine/.cache/huggingface
     # Health check probes /health every 30 s after a generous start grace
-    # period. First-run cold start dominates timing:
-    #   • dima806 ViT download    ~340 MB (1-5 min on residential broadband)
-    #   • MTCNN P-Net warm-up     ~5 s
-    #   • Pyspy/transformers init ~10 s
-    # 300 s grace covers slow connections; once cached, real startup is <60 s.
+    # period. First-run cold start downloads two large HF models in series:
+    #   • dima806 ViT                        ~340 MB
+    #   • abhishtagatya/wavlm deepfake       ~360 MB
+    #   • MTCNN P-Net warm-up                  ~5 s
+    # On a slow residential connection (1 MB/s) the downloads alone take
+    # ~12 minutes. 600 s grace covers most cases; once the hf-cache volume
+    # is seeded, subsequent boots complete in well under 60 s and the
+    # extended grace is unused.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\" || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 300s
+      start_period: 600s
 
   frontend:
     build:

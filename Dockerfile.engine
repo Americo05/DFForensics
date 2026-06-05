@@ -72,17 +72,31 @@ RUN grep -ivE '^(torch|torchvision|facenet-pytorch)==' requirements.txt > /tmp/r
     && pip install --no-cache-dir h5py
 
 # ─── Stage 2: weights ────────────────────────────────────────────────────────
-# Run the MesoNet downloader once during the build so the runtime image
-# already contains the converted PyTorch state_dict. Saves ~30 s on first
-# inference and removes the runtime dependency on internet + h5py.
+# Pre-fetch all ML weights during the build so the runtime image contains
+# them. Two reasons:
+#   1. First /api/analyze call doesn't pay the 5-15 min download cost
+#      (combined dima806 ViT ~340 MB + WavLM deepfake ~360 MB on top of
+#      MesoNet's ~160 KB).
+#   2. The healthcheck doesn't fight a slow connection during cold start —
+#      important because docker-compose's frontend `depends_on:
+#      service_healthy` gate uses it.
+#
+# The trade-off is image size: this stage adds ~700 MB to the final image
+# (~3.0 GB → ~3.7 GB). Worth it for demo / academic deployment where the
+# image is built once and run many times.
 FROM builder AS weights
 
 WORKDIR /build
-# Only copy what the script needs to run (avoids busting the cache when
-# unrelated engine code changes).
+# MesoNet — small (~160 KB), uses the bundled converter that needs h5py.
 COPY engine/scripts/download_mesonet_weights.py /build/engine/scripts/
-# The script writes to engine/models/ relative to its own location.
 RUN python /build/engine/scripts/download_mesonet_weights.py
+
+# Hugging Face models — pre-seed the cache to a location the runtime stage
+# will copy into the engine user's home. Using HF_HOME isolates this from
+# the user's host cache and lets us COPY the directory cleanly.
+ENV HF_HOME=/build/hf-cache
+RUN python -c "from transformers import pipeline; pipeline('image-classification', model='dima806/deepfake_vs_real_image_detection')" \
+    && python -c "from transformers import AutoModelForAudioClassification, AutoFeatureExtractor; m='abhishtagatya/wavlm-base-960h-itw-deepfake'; AutoModelForAudioClassification.from_pretrained(m); AutoFeatureExtractor.from_pretrained(m)"
 
 # ─── Stage 3: runtime ────────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
@@ -124,6 +138,11 @@ WORKDIR /app
 COPY --chown=engine:engine engine/ /app/engine/
 # And the weights from the weights stage.
 COPY --chown=engine:engine --from=weights /build/engine/models/ /app/engine/models/
+# Hugging Face cache pre-populated during the build (dima806 ViT + WavLM
+# deepfake). Point HF_HOME at it so transformers finds the cached files
+# without contacting the network on first request.
+COPY --chown=engine:engine --from=weights /build/hf-cache /home/engine/.cache/huggingface
+ENV HF_HOME=/home/engine/.cache/huggingface
 
 USER engine
 
