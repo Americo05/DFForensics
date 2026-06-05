@@ -1,0 +1,67 @@
+# Build artefacts and dependencies that bloat the build context.
+# Anything here is excluded from the COPY layer; without this file Docker
+# would ship the whole .venv (~2GB) and node_modules (~500MB) into every
+# build, slowing each rebuild and producing useless cache misses.
+
+# Python venv + cache
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Node / Next.js build artefacts (rebuilt inside the frontend stage)
+node_modules/
+.next/
+out/
+.pnp.*
+.yarn/
+
+# Editor / OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Local data and benchmark intermediates — huge and never needed inside
+# the image (datasets stay on the host; benchmark results are regenerable).
+engine/tests/datasets/
+engine/tests/benchmark_results/
+per_file_scores_*.csv
+
+# Dev artefacts the gitignore picked up
+install_log.txt
+requirements_temp.txt
+*.log
+
+# Env files — must NEVER be baked into an image
+.env
+.env.*
+!.env.example
+
+# Built model weights are an EXCEPTION: we want them baked in for fast
+# cold-start. The engine Dockerfile downloads them in the weights stage
+# rather than copying from the build context, so the local engine/models/
+# directory (if present) doesn't ship.
+engine/models/*.h5
+engine/models/*.pt
+engine/models/*.pth
+engine/models/*.bin
+
+# Frontend TypeScript build state
+*.tsbuildinfo
+next-env.d.ts
+
+# Markdown / docs we don't need at runtime (image stays slim)
+*.md
+docs/
+BENCHMARKS_*.md

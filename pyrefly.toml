@@ -1,0 +1,34 @@
+# Pyrefly type-checker configuration.
+#
+# Why this file exists
+# --------------------
+# Pyrefly does NOT read VS Code's `python.analysis.extraPaths` setting — it
+# has its own discovery logic. Without this file it can't find numpy, cv2,
+# torch, etc. installed inside the `.venv` and floods the editor with
+# "Cannot find module" errors that don't reflect real problems.
+#
+# Pointing it at the venv's interpreter is the simplest fix: Pyrefly then
+# resolves `site-packages` automatically.
+
+# Use the project's virtualenv interpreter. Adjust the path if your venv
+# lives elsewhere.
+python-interpreter = ".venv/Scripts/python.exe"
+
+# Files Pyrefly should type-check.
+project-includes = [
+    "engine/**/*.py",
+]
+
+# Don't try to check vendored / generated code.
+project-excludes = [
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/.pytest_cache/**",
+    "**/node_modules/**",
+    "engine/tests/benchmark_results/**",
+    "engine/tests/datasets/**",
+]
+
+# `engine/` is the import root so `from core.foo import Bar` resolves the
+# same way the runtime sees it (engine/main.py does `from core...`).
+search-path = ["engine"]

@@ -1,0 +1,125 @@
+# =============================================================================
+# Dockerfile.engine — Python FastAPI backend for the Deepfake Forensics Engine.
+#
+# Three-stage build:
+#   1. builder — installs Python dependencies into a venv (CPU-only PyTorch
+#      so the image stays under 4 GB; CUDA would add ~3 GB of nvidia libs).
+#   2. weights — runs the MesoNet download/conversion script ONCE so the
+#      converted state_dict is baked into the runtime image. First request
+#      after cold-start doesn't pay the network + conversion cost.
+#   3. runtime — slim Python image with just the installed packages, the
+#      converted weights, and the engine source. No build toolchain ships.
+#
+# Resulting image is ~3 GB (Python + torch CPU + transformers + mediapipe).
+# That's the floor for what these libraries take on disk; can't be slimmer
+# without dropping plugins.
+# =============================================================================
+
+# ─── Stage 1: builder ────────────────────────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+# Build-time deps: gcc / libs needed by opencv-headless wheels, libsndfile
+# for librosa (audio loading), git for any pip-installable VCS URLs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    libsndfile1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create an isolated venv inside the image so the runtime stage can copy
+# just /opt/venv instead of system site-packages.
+ENV VIRTUAL_ENV=/opt/venv
+RUN python -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+WORKDIR /build
+
+# Install CPU-only PyTorch first. The default `pip install torch` on Linux
+# pulls the CUDA build (~2.5 GB of nvidia libraries we never use here).
+# The CPU wheel is ~200 MB and works on every machine — including ARM via
+# emulation. If you have an NVIDIA GPU, see DEPLOYMENT.md for the CUDA
+# image variant.
+#
+# We don't pin a specific version because the +cpu local-version suffix
+# breaks PEP 440 strict-equality matching against the frozen requirements
+# (e.g. `torch==2.11.0` won't match `2.11.0+cpu`). Whatever the CPU index
+# has as latest is fine for inference — the PyTorch API is stable enough.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir torch torchvision \
+        --index-url https://download.pytorch.org/whl/cpu
+
+# Now the rest of the requirements. Filter out torch/torchvision so pip
+# doesn't try to "fix" the CPU build we just installed.
+COPY requirements.txt .
+RUN grep -ivE '^(torch|torchvision)==' requirements.txt > /tmp/req-no-torch.txt \
+    && pip install --no-cache-dir -r /tmp/req-no-torch.txt \
+    # h5py is needed by the weight downloader (next stage) but isn't in the
+    # frozen requirements yet — install explicitly.
+    && pip install --no-cache-dir h5py
+
+# ─── Stage 2: weights ────────────────────────────────────────────────────────
+# Run the MesoNet downloader once during the build so the runtime image
+# already contains the converted PyTorch state_dict. Saves ~30 s on first
+# inference and removes the runtime dependency on internet + h5py.
+FROM builder AS weights
+
+WORKDIR /build
+# Only copy what the script needs to run (avoids busting the cache when
+# unrelated engine code changes).
+COPY engine/scripts/download_mesonet_weights.py /build/engine/scripts/
+# The script writes to engine/models/ relative to its own location.
+RUN python /build/engine/scripts/download_mesonet_weights.py
+
+# ─── Stage 3: runtime ────────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+# Runtime-only deps: libgl/libglib for opencv-headless, ffmpeg for audio
+# extraction (lip-sync analyzer reads the audio track via imageio-ffmpeg),
+# libsndfile1 for librosa, tini as PID 1 to forward signals properly.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libsndfile1 \
+    ffmpeg \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Bring the venv over from the builder stage. PATH already covers the
+# binaries that ship inside it.
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/engine
+
+# Run as a non-root user. Most production deployments require it, and it
+# keeps the blast radius small if uploaded media triggers a parser CVE.
+RUN useradd --create-home --uid 1000 engine
+WORKDIR /app
+
+# Copy engine source. The .dockerignore at the project root excludes
+# .venv, datasets, and benchmark intermediates so this stays small.
+COPY --chown=engine:engine engine/ /app/engine/
+# And the weights from the weights stage.
+COPY --chown=engine:engine --from=weights /build/engine/models/ /app/engine/models/
+
+USER engine
+
+EXPOSE 8000
+
+# tini reaps zombies and forwards SIGTERM cleanly to uvicorn — important
+# so that `docker stop` finishes within the default 10s grace period
+# instead of hanging on FastAPI's BackgroundTasks.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Single worker by default — the PluginManager has a process-wide lock
+# because the underlying ML model pipelines aren't reentrant across
+# threads. Scale by running multiple containers behind a load balancer,
+# not by raising --workers here.
+CMD ["uvicorn", "main:app", \
+     "--app-dir", "/app/engine", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1"]

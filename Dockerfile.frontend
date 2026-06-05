@@ -1,0 +1,71 @@
+# =============================================================================
+# Dockerfile.frontend — Next.js 16 dashboard for the Deepfake Forensics Engine.
+#
+# Three-stage build mirroring the Next.js recommended pattern:
+#   1. deps    — installs node_modules (cached layer, busts only when
+#                package-lock.json changes).
+#   2. builder — runs `next build`, which with output:'standalone' in
+#                next.config.ts produces a self-contained server bundle
+#                under .next/standalone.
+#   3. runner  — minimal node:alpine image with ONLY the standalone bundle
+#                + static assets + public/. Total runtime image ~200 MB.
+# =============================================================================
+
+# ─── Stage 1: deps ───────────────────────────────────────────────────────────
+FROM node:20-alpine AS deps
+
+# Alpine ships musl libc; some native modules need libc6-compat to load
+# glibc-compiled binaries (sharp, swc, etc.). Cheap insurance.
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# Copy only the manifests so this layer caches as long as deps don't change.
+COPY package.json package-lock.json* ./
+
+# `npm ci` enforces an exact match against package-lock.json — fails the
+# build on drift instead of silently picking newer versions.
+RUN npm ci
+
+# ─── Stage 2: builder ────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Telemetry is opt-out for the build environment.
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# `output: 'standalone'` in next.config.ts must be set; without it the
+# .next/standalone directory won't exist and the runner stage's COPY
+# instructions will fail.
+RUN npm run build
+
+# ─── Stage 3: runner ─────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME="0.0.0.0"
+
+# Non-root user for the same reason as the engine image.
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
+
+# The standalone bundle includes its own minimal node_modules. Static
+# assets and the public/ directory must be copied separately — Next.js
+# stages them outside .next/standalone for cache-friendly serving.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+
+USER nextjs
+
+EXPOSE 3000
+
+# The standalone bundle places server.js at the package root.
+CMD ["node", "server.js"]

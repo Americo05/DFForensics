@@ -1,0 +1,277 @@
+% ============================================================================
+% Benchmarks section for the academic report (LaTeX).
+%
+% Drop this file into the report's source tree (e.g. chapters/benchmarks.tex)
+% and include it with \input{chapters/benchmarks}. The figures referenced are
+% at docs/figures/; either copy them into the
+% report's images directory or update the \graphicspath{} accordingly.
+%
+% Required packages in the report preamble:
+%   \usepackage{graphicx}
+%   \usepackage{booktabs}
+%   \usepackage{multirow}
+%   \usepackage{xcolor}
+%   \usepackage{hyperref}
+%   \usepackage{siunitx}      % for S column type in tables
+%
+% No \documentclass or \begin{document} here — this is a section to be
+% \input{}'d, not a standalone document.
+% ============================================================================
+
+\chapter{Avaliação Empírica}
+\label{ch:benchmarks}
+
+Este capítulo apresenta a validação empírica do motor de deteção em três
+\emph{datasets} públicos representativos, com análise por \emph{plugin} e
+discussão da generalização cruzada entre conjuntos.
+
+\section{Datasets}
+\label{sec:bench:datasets}
+
+A Tabela~\ref{tab:bench:datasets} resume os três \emph{datasets} utilizados.
+A escolha cobre três regimes distintos de manipulação: síntese total
+(StyleGAN2), \emph{face-swap} clássico (FaceForensics++), e \emph{face-swap}
+adversarial concebido especificamente para resistir a detetores treinados em
+FF++ (Celeb-DF v2).
+
+\begin{table}[ht]
+\centering
+\caption{\emph{Datasets} usados na avaliação.}
+\label{tab:bench:datasets}
+\small
+\begin{tabular}{lllr}
+\toprule
+\textbf{Dataset} & \textbf{Tipo de manipulação} & \textbf{Formato} & \textbf{N usado} \\
+\midrule
+140k Real and Fake Faces & StyleGAN2 (síntese total) & Imagens 256$\times$256 & 400 \\
+FaceForensics++          & Face-swap clássico         & Vídeo MP4              & 200 \\
+Celeb-DF v2              & Face-swap adversarial      & Vídeo MP4 (sem áudio)  & 200 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Metodologia}
+\label{sec:bench:methodology}
+
+Cada ficheiro é processado pela \emph{pipeline} completa: extração de
+60~\emph{frames} (vídeo) ou frame único (imagem), deteção de faces via MTCNN
+partilhada por todos os \emph{plugins}, classificação de cena
+($\mathrm{CROPPED\_FACE}$, $\mathrm{FACE\_IN\_SCENE}$, $\mathrm{NO\_FACE}$),
+\emph{scoring} ponderado por \emph{plugin} segundo a tabela \mbox{\texttt{SCENE\_PLUGIN\_WEIGHTS}},
+e agregação por \emph{frame} (\textsc{max} entre faces) e por vídeo (média).
+
+A métrica primária é a \textbf{AUC} (\emph{Area Under the ROC Curve}),
+calculada via Mann--Whitney $U$, que é independente do \emph{threshold} e
+mede a capacidade do classificador de ordenar exemplos. Para quantificar a
+incerteza amostral, cada AUC é reportada com um \textbf{intervalo de
+confiança a 95\%} obtido por \emph{bootstrap} não-paramétrico
+(1000~re-amostragens com reposição). Diferenças cujos intervalos se
+sobrepõem \textbf{não são estatisticamente significativas}, mesmo quando as
+estimativas pontuais diferem visivelmente. A \textbf{F$_1$} é reportada ao
+\emph{threshold} de produção $\tau=0.6$ e é dependente do
+\emph{threshold}; a sua interpretação requer cuidado.
+
+\paragraph{Agregação por \emph{plugin} versus por \emph{ensemble}.}
+É importante notar que a AUC por \emph{plugin} e a AUC do \emph{ensemble}
+provêm de \textbf{caminhos de agregação distintos}: a AUC por \emph{plugin}
+é calculada sobre a média simples das pontuações do \emph{plugin} em todas
+as combinações (\emph{frame}, face) do ficheiro; a AUC do \emph{ensemble}
+passa por uma média ponderada por \emph{plugin} por face, seguida de um
+\textsc{max} sobre faces (filtradas por área), e finalmente uma média sobre
+\emph{frames}. A não-linearidade introduzida pelo \textsc{max} é o que
+permite, em teoria, que a AUC do \emph{ensemble} exceda a do melhor
+\emph{plugin} individual quando os erros dos componentes estão
+descorrelacionados (Kuncheva, 2014). Esta comparação deve ser sempre
+interpretada à luz dos intervalos de confiança reportados.
+
+O detetor \emph{cloud} (Sightengine) foi desativado em todas as execuções
+(\texttt{SIGHTENGINE\_ENABLED=false}) para garantir reprodutibilidade. Os
+pesos do MesoNet utilizados são \texttt{Meso4\_DF.h5}, treinados em FF++
+\emph{Deepfakes}.
+
+\section{Resultados}
+\label{sec:bench:results}
+
+\subsection{Resumo}
+
+A Tabela~\ref{tab:bench:headline} apresenta a AUC \emph{overall} (do
+\emph{ensemble}) e por \emph{plugin}. A Figura~\ref{fig:bench:heatmap}
+visualiza a mesma informação em \emph{heatmap}, com cor verde a indicar
+sinal útil ($\mathrm{AUC} \geq 0.5$) e vermelho a indicar sinal invertido
+($\mathrm{AUC} < 0.5$).
+
+\begin{table}[ht]
+\centering
+\caption{AUC com intervalo de confiança a 95\% (\emph{bootstrap}, 1000~re-amostragens),
+por \emph{plugin} e \emph{dataset}. Células a negrito marcam o melhor
+\emph{plugin} por linha. Células marcadas com $\dagger$ indicam
+$\mathrm{AUC} < 0.5$ (sinal invertido, anti-correlacionado com o rótulo).}
+\label{tab:bench:headline}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lr|cccccc}
+\toprule
+\textbf{Dataset} & \textbf{N} & \textbf{Ensemble} & \textbf{DCT} & \textbf{ViT} & \textbf{Edge} & \textbf{MesoNet} & \textbf{PRNU} \\
+\midrule
+140k (StyleGAN) & 400 &
+0.50 [0.45, 0.56] &
+0.56 [0.50, 0.61] &
+\textbf{0.63 [0.58, 0.69]} &
+0.48$^\dagger$ [0.42, 0.53] &
+--- &
+0.45$^\dagger$ [0.40, 0.51] \\
+FF++ & 200 &
+\textbf{0.74 [0.68, 0.80]} &
+0.66 [0.58, 0.74] &
+0.46$^\dagger$ [0.37, 0.54] &
+0.42$^\dagger$ [0.34, 0.50] &
+\textbf{0.72 [0.64, 0.79]} &
+0.50 [0.41, 0.58] \\
+Celeb-DF v2 (sem MesoNet) & 200 &
+0.40$^\dagger$ [0.33, 0.48] &
+\textbf{0.56 [0.48, 0.64]} &
+0.53 [0.46, 0.61] &
+0.41$^\dagger$ [0.33, 0.49] &
+--- &
+0.42$^\dagger$ [0.34, 0.50] \\
+Celeb-DF v2 (com MesoNet) & 200 &
+0.53 [0.45, 0.61] &
+\textbf{0.56 [0.48, 0.64]} &
+0.53 [0.46, 0.61] &
+0.41$^\dagger$ [0.33, 0.49] &
+0.50 [0.42, 0.58] &
+0.42$^\dagger$ [0.34, 0.50] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.85\linewidth]{docs/figures/fig_auc_heatmap.png}
+\caption{AUC por \emph{plugin} e \emph{dataset}. Verde indica sinal útil
+($\mathrm{AUC} \geq 0.5$), vermelho indica sinal invertido.}
+\label{fig:bench:heatmap}
+\end{figure}
+
+\subsection{Análise por plugin e por dataset}
+
+A Figura~\ref{fig:bench:bars} detalha as AUCs por \emph{plugin} com barras
+de erro a 95\%, comparadas com a AUC do \emph{ensemble} (linha tracejada,
+banda sombreada para o seu próprio IC). No \textbf{FaceForensics++}, o
+\emph{ensemble} ($0.74$, IC $[0.68, 0.80]$) e o melhor \emph{plugin}
+individual (MesoNet, $0.72$, IC $[0.64, 0.79]$) têm intervalos de confiança
+sobrepostos largamente --- a diferença pontual de $0.02$ está
+\textbf{dentro do ruído amostral} a este $N$. A afirmação correta é que o
+\emph{ensemble} é \emph{indistinguível} do melhor \emph{plugin}, não que o
+supere.
+
+No \textbf{140k}, o \emph{ensemble} ($0.50$, IC $[0.45, 0.56]$) é
+significativamente \emph{pior} que o melhor \emph{plugin} individual
+(ViT, $0.63$, IC $[0.58, 0.69]$): os intervalos não se sobrepõem. Isto é
+um resultado honesto e relevante --- a presença de \emph{plugins} com
+sinal invertido (Edge Blending, PRNU) arrasta o \emph{ensemble} para
+abaixo do componente isoladamente mais forte. Em Celeb-DF v2 (com MesoNet),
+o \emph{ensemble} ($0.53$) é estatisticamente equivalente ao DCT sozinho
+($0.56$). Em nenhum \emph{dataset} se verifica a afirmação clássica
+``\emph{ensemble} supera o melhor componente'' com significância estatística.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{docs/figures/fig_auc_per_dataset.png}
+\caption{AUC por \emph{plugin} em cada \emph{dataset}. Barras vermelhas
+indicam $\mathrm{AUC} < 0.5$ (sinal invertido). A linha tracejada preta é a
+AUC do \emph{ensemble}; a linha pontilhada cinzenta é o limiar aleatório
+($0.5$).}
+\label{fig:bench:bars}
+\end{figure}
+
+\subsection{Curvas ROC do ensemble}
+
+A Figura~\ref{fig:bench:roc} mostra as curvas ROC \emph{overall} para cada
+\emph{dataset}. A curva do FaceForensics++ desvia-se claramente da diagonal
+($\mathrm{AUC}=0.744$), enquanto o Celeb-DF v2 com MesoNet apenas
+ligeiramente, e o Celeb-DF v2 sem MesoNet \emph{abaixo} da diagonal --- o
+\emph{ensemble} era anti-preditivo antes de integrar o MesoNet.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.7\linewidth]{docs/figures/fig_roc_overall.png}
+\caption{Curvas ROC do \emph{ensemble} para os três \emph{datasets} avaliados.}
+\label{fig:bench:roc}
+\end{figure}
+
+\section{Discussão}
+\label{sec:bench:discussion}
+
+\paragraph{Generalização inter-pipeline do MesoNet.}
+O MesoNet atinge $\mathrm{AUC}=0.72$ em FaceForensics++ (em distribuição) e
+exatamente $0.500$ em Celeb-DF v2 (fora de distribuição). Este colapso
+total reproduz o fenómeno reportado por Li \emph{et al.} (CVPR 2020) para a
+maioria dos detetores treinados num único \emph{pipeline} de \emph{face-swap}:
+o modelo não generaliza para manipulações geradas por algoritmos diferentes,
+mesmo da mesma família. A implicação prática é que um único detetor neural
+--- mesmo concebido para deepfakes --- é insuficiente para uma deployment
+real; é necessário um \emph{ensemble} de detetores treinados em famílias
+distintas de manipulação.
+
+\paragraph{Robustez do DCT.}
+O \emph{plugin} DCT mantém AUC entre $0.56$ e $0.66$ em todos os
+\emph{datasets}. Esta consistência deve-se ao facto de a sua heurística
+(desvio à lei de potência $1/f^2$) ser uma propriedade física das imagens
+naturais, não aprendida e independente do \emph{dataset}. O preço desta
+consistência é o teto baixo: o DCT sozinho não excede $\mathrm{AUC}=0.66$,
+abaixo do que um detetor neural in-distribution alcança.
+
+\paragraph{Falha do ensemble naïve de média ponderada.}
+Em Celeb-DF v2, o \emph{ensemble} pré-MesoNet ($\mathrm{AUC}=0.40$) era
+pior que o melhor \emph{plugin} individual ($\mathrm{DCT}=0.56$). Isto ocorre
+porque PRNU ($0.41$) e \emph{Edge Blending} ($0.41$) contribuem com
+\emph{ranking} invertido, e a média ponderada combina-os aditivamente. Um
+detetor real deveria (\textit{i}) excluir \emph{plugins} com AUC abaixo de
+uma margem num conjunto de validação, ou (\textit{ii}) aprender os pesos do
+\emph{ensemble} com consciência de sinal.
+
+\paragraph{Comparação com a literatura.}
+Rossler \emph{et al.} (ICCV 2019) reportam para XceptionNet em FF++:
+$\mathrm{AUC} \approx 0.95$ (raw), $0.92$ (c23), e $0.78$ (c40). A nossa
+$\mathrm{AUC}=0.744$ é consistente com conteúdo c40-comprimido usando um
+\emph{backbone} mais pequeno (MesoNet com $\sim$30k parâmetros vs Xception
+com $\sim$22M). Para Celeb-DF v2, Li \emph{et al.} reportam $0.65$--$0.85$
+AUC para detetores SOTA --- a nossa $0.527$ documenta a dificuldade conhecida
+deste conjunto, especialmente quando o detetor neural integrado não foi
+treinado nele.
+
+\section{Limitações e ameaças à validade}
+\label{sec:bench:limitations}
+
+\begin{itemize}
+  \item \textbf{Tamanho amostral $N=200$ implica IC$_{95\%}$ de $\pm 0.04$ a $\pm 0.06$ para a AUC.}
+        A análise \emph{bootstrap} (1000~re-amostragens) é aplicada a todas
+        as métricas reportadas. Diferenças cujos intervalos se sobrepõem
+        devem ser tratadas como estatisticamente inconclusivas.
+  \item \textbf{Split de teste único por \emph{dataset}.} A variância
+        amostral é estimada por \emph{bootstrap}; a variância entre
+        \emph{splits} de treino/teste não é avaliada (esta usa apenas o
+        \emph{split} de teste oficial de cada \emph{dataset}).
+  \item \textbf{Celeb-DF v2 não tem áudio,} pelo que os \emph{plugins} de
+        sincronização labial e WavLM não foram validados nestas execuções.
+  \item \textbf{Classe de compressão do FF++ não confirmada} (provavelmente
+        c40). Em c23 a AUC reportada seria mais alta.
+\end{itemize}
+
+\section{Conclusões}
+\label{sec:bench:conclusion}
+
+O motor desenvolvido atinge desempenho em linha com baselines da literatura
+em \emph{face-swap} clássico ($\mathrm{AUC}=0.74$ em FF++, IC $[0.68, 0.80]$).
+O \emph{ensemble} é estatisticamente indistinguível do melhor \emph{plugin}
+individual (MesoNet, $0.72$, IC $[0.64, 0.79]$) a este tamanho amostral ---
+uma afirmação mais conservadora, e honesta, do que o discurso comum
+``\emph{ensemble} supera todos os componentes''. No regime adversarial
+(Celeb-DF v2) a AUC degrada para $0.53$, confirmando a dificuldade de
+generalização inter-\emph{pipeline} documentada na literatura. O motor é melhor enquadrado como
+\emph{plataforma extensível de análise forense} do que como detetor de uso
+geral: produz evidência multi-modal interpretável (\emph{scores} por
+\emph{plugin}, decisões de routing, \emph{timestamps} por \emph{frame}) e
+permite substituir detetores individuais à medida que surgem modelos mais
+robustos --- limitação reportada honestamente em vez de mascarada.

@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main, Américo]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Frontend (TypeScript + ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npx eslint "src/**/*.{ts,tsx}" --max-warnings=0
+
+      - name: Build (Next.js)
+        run: npm run build
+
+  backend:
+    name: Backend (Python tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install minimal test dependencies
+        # We deliberately don't install the heavy ML stack at full strength
+        # here — the test suite is designed to run on pure-logic modules
+        # without torch / mediapipe / librosa. If those imports fail at
+        # module load, the affected test files will fail and we know the
+        # regression is real for users who DO have the full stack.
+        #
+        # Version pins: mediapipe>=0.10.21 removed the mp.solutions namespace
+        # the lip-sync analyzer relies on; pinning to <0.10.21 keeps the API
+        # we use without forcing a rewrite to the new MediaPipe Tasks API
+        # (tracked as future work).
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest numpy opencv-python-headless
+          # Optional ML stack — best-effort; tests that need them will fail
+          # cleanly if missing
+          pip install "mediapipe<0.10.21" librosa torch torchvision transformers pillow imageio-ffmpeg facenet-pytorch python-dotenv requests fastapi uvicorn || true
+
+      - name: Run pytest
+        run: python -m pytest engine/tests -v --tb=short
+
+  python-syntax:
+    name: Python syntax (AST check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: AST parse all engine files
+        run: |
+          python -c "
+          import ast, os, sys
+          files = []
+          for root, _, names in os.walk('engine'):
+              if 'benchmark_results' in root or '__pycache__' in root:
+                  continue
+              files += [os.path.join(root, n) for n in names if n.endswith('.py')]
+          errors = []
+          for f in files:
+              try:
+                  ast.parse(open(f, encoding='utf-8').read())
+              except SyntaxError as e:
+                  errors.append((f, str(e)))
+          if errors:
+              for f, e in errors:
+                  print(f'FAIL {f}: {e}')
+              sys.exit(1)
+          print(f'OK: {len(files)} Python files parse cleanly')
+          "

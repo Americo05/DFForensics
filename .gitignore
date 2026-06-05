@@ -1,0 +1,99 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+# But DO commit the example template — it documents which vars exist.
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env/
+.venv/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# debug / scratch artifacts
+temp_*.txt
+temp_*.json
+scratch/
+*.log
+
+# editor / OS — share project-level settings, ignore personal/runtime files
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+
+# benchmark outputs (large, regenerable)
+engine/tests/benchmark_results/
+engine/tests/datasets/
+
+# downloaded model weights (regenerable via engine/scripts/download_*.py)
+engine/models/*.h5
+engine/models/*.pt
+engine/models/*.pth
+engine/models/*.bin
+
+# ad-hoc dev artifacts from venv recreation / pip install runs
+install_log.txt
+requirements_temp.txt
+
+# WIP academic report drafts — kept local to avoid exposing unfinished
+# writing on a public repo. Final relatório is delivered separately to the
+# orientador / examinadores, not through this repository.
+docs/relatorio/
+
+# Game dataset — local-only image sets populated from third-party datasets
+# (140k Real/Fake, FFHQ, etc.). Kept off the public repo to avoid
+# redistributing images whose models may not have consented to inclusion in
+# a deepfake-detection challenge. Populate via engine/scripts/build_game_dataset.py.
+# The committed fallback-fakes/ subdirectory is intentional: those are
+# StyleGAN-generated faces (no real person) used as the public-demo fallback.
+public/game-images/real/
+public/game-images/fake/
+public/game-images/manifest.json

@@ -1,0 +1,86 @@
+# =============================================================================
+# docker-compose.yml — local development & demo deployment.
+#
+# One command to bring up the whole stack:
+#     docker compose up --build
+#
+# Two services:
+#   • engine    — Python FastAPI backend on :8000 (Dockerfile.engine)
+#   • frontend  — Next.js dashboard on :3000   (Dockerfile.frontend)
+#
+# The frontend's getApiBase() builds the API URL from window.location.hostname
+# at run time, so the browser hits localhost:8000 directly — no need for a
+# reverse proxy or NEXT_PUBLIC_API_BASE for local use. For deployments where
+# the engine isn't on the same host, set NEXT_PUBLIC_ENGINE_API_BASE (not
+# wired in the frontend yet; see DEPLOYMENT.md).
+#
+# Env vars come from a local .env file at the project root. Copy .env.example
+# to .env to tweak; missing values fall back to the defaults baked into the
+# code, so the stack runs out of the box without an .env file.
+# =============================================================================
+
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    image: deepfake-engine:local
+    container_name: deepfake-engine
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Tuning knobs. All optional — see .env.example for the full list.
+      ENGINE_API_KEYS: ${ENGINE_API_KEYS:-}
+      ENGINE_RATE_LIMIT_PER_MIN: ${ENGINE_RATE_LIMIT_PER_MIN:-10}
+      ENGINE_MAX_UPLOAD_MB: ${ENGINE_MAX_UPLOAD_MB:-200}
+      # Sightengine cloud detector — disabled by default to avoid spending
+      # quota on demos. Set SIGHTENGINE_ENABLED=true and supply credentials
+      # to enable.
+      SIGHTENGINE_ENABLED: ${SIGHTENGINE_ENABLED:-false}
+      SIGHTENGINE_API_USER: ${SIGHTENGINE_API_USER:-}
+      SIGHTENGINE_API_SECRET: ${SIGHTENGINE_API_SECRET:-}
+    volumes:
+      # Persist the SQLite history DB (~/.deepfake-forensics/history.db) to the
+      # host. Without this bind mount, `docker compose down` wipes the user's
+      # /historico view — which defeats the point of having a history at all.
+      #
+      # Cross-platform path resolution:
+      #   • Linux / macOS: ${HOME} → /home/<user> or /Users/<user>
+      #   • Windows:       ${USERPROFILE} → C:\Users\<user>
+      # Compose tries HOME first and falls back to USERPROFILE.
+      #
+      # The container runs as user `engine` (uid 1000, see Dockerfile.engine),
+      # so the in-container target is /home/engine/.deepfake-forensics — that's
+      # where Path.home() resolves for the Python process.
+      - "${HOME:-${USERPROFILE}}/.deepfake-forensics:/home/engine/.deepfake-forensics"
+    # Health check probes /health every 30 s after a 60 s start grace
+    # period (model loading + first MTCNN warm-up dominate cold start).
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: deepfake-frontend:local
+    container_name: deepfake-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Only matters when the engine has ENGINE_API_KEYS set — the frontend
+      # then needs to send X-API-Key on every request. Empty = no auth.
+      NEXT_PUBLIC_ENGINE_API_KEY: ${NEXT_PUBLIC_ENGINE_API_KEY:-}
+    depends_on:
+      # `depends_on` only waits for the container to START, not for the
+      # engine to be HEALTHY. Use `condition: service_healthy` to gate
+      # frontend startup behind the engine being responsive — costs an
+      # extra ~60 s on cold start but avoids the user hitting a 502 if
+      # they open the dashboard before models finish loading.
+      engine:
+        condition: service_healthy
