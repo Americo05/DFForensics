@@ -66,9 +66,9 @@ const DETECTORS: DetectorCard[] = [
   {
     name: 'Sightengine Cloud',
     family: 'visual',
-    weight: '0.20 em CROPPED_FACE',
+    weight: 'usado em exclusivo no modo Cloud',
     short: 'API comercial cloud para deteção de deepfake e conteúdo AI-generated.',
-    long: 'Único plugin externo — opcional, requer credenciais. Combinado em paralelo com os detetores locais quando o utilizador o ativa. Rate-limited (1 chamada a cada 10 frames) para preservar a quota gratuita.',
+    long: 'Único plugin externo — opcional, requer credenciais. Quando o utilizador ativa "Cloud API" no upload, este plugin corre sozinho e substitui os detetores locais (não funciona em conjunto com eles). Rate-limited (1 chamada a cada 10 frames) para preservar a quota gratuita.',
   },
 ];
 

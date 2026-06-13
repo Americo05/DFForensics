@@ -51,12 +51,45 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [useCloudApi, setUseCloudApi] = useState(true);
   const [progress, setProgress] = useState<ProgressData | null>(null);
+  // null = a verificar; false = sem API key configurada no engine; true = pronto.
+  const [cloudPluginAvailable, setCloudPluginAvailable] = useState<boolean | null>(null);
   // Demo mode = no local engine reachable (public Vercel deploy). Start as
   // true so SSR + hydration agree on the public site; flip to false in the
   // post-mount effect below when the page is actually served from localhost.
   const [demoMode, setDemoMode] = useState(true);
   useEffect(() => {
     setDemoMode(isDemoMode());
+  }, []);
+
+  // Após o mount, pergunta ao engine quais plugins estão configurados.
+  // O plugin Sightengine só está "configured" quando SIGHTENGINE_API_USER/SECRET
+  // estão presentes nas env vars do engine. Se não estiverem, o botão "Cloud API"
+  // fica desativado e forçamos o toggle para off para evitar requests inúteis.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch(`${getApiBase()}/health`, { headers: apiHeaders() });
+        if (!res.ok) throw new Error(`health ${res.status}`);
+        const data = await res.json() as {
+          active_plugins?: Array<{ name?: string; configured?: boolean }>;
+        };
+        const cloud = data.active_plugins?.find(p =>
+          (p.name ?? '').toLowerCase().includes('sightengine')
+        );
+        if (cancelled) return;
+        const available = Boolean(cloud?.configured);
+        setCloudPluginAvailable(available);
+        if (!available) setUseCloudApi(false);
+      } catch {
+        if (!cancelled) {
+          setCloudPluginAvailable(false);
+          setUseCloudApi(false);
+        }
+      }
+    };
+    void fetchHealth();
+    return () => { cancelled = true; };
   }, []);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -427,34 +460,57 @@ export default function Home() {
               )}
             </div>
 
-            {/* Cloud API Toggle */}
-            <div className="mt-6 flex items-center justify-center gap-3">
+            {/* Cloud API Toggle — desativado quando o engine não tem credenciais
+                Sightengine, para evitar que o utilizador ative algo sem efeito. */}
+            <div className="mt-6 flex flex-col items-center justify-center gap-2">
               <button
-                onClick={(e) => { e.stopPropagation(); setUseCloudApi(!useCloudApi); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (cloudPluginAvailable === false) return;
+                  setUseCloudApi(!useCloudApi);
+                }}
+                disabled={cloudPluginAvailable === false}
+                aria-disabled={cloudPluginAvailable === false}
+                title={
+                  cloudPluginAvailable === false
+                    ? 'Plugin Sightengine sem API key configurada no engine. Define SIGHTENGINE_API_USER e SIGHTENGINE_API_SECRET no .env e reinicia o motor.'
+                    : undefined
+                }
                 className={`
                   relative flex items-center gap-3 px-5 py-2.5 rounded-full text-sm font-medium
                   transition-all duration-300 border
-                  ${useCloudApi
-                    ? 'bg-purple-500/15 border-purple-500/40 text-purple-300 shadow-[0_0_20px_-6px_rgba(168,85,247,0.4)]'
-                    : isDark ? 'bg-zinc-900/50 border-zinc-700/50 text-zinc-500 hover:border-zinc-600' : 'bg-white/60 border-zinc-300 text-zinc-500 hover:border-zinc-400'}
+                  ${cloudPluginAvailable === false
+                    ? 'opacity-50 cursor-not-allowed ' + (isDark ? 'bg-zinc-900/50 border-zinc-800 text-zinc-600' : 'bg-zinc-100 border-zinc-300 text-zinc-400')
+                    : useCloudApi
+                      ? 'bg-purple-500/15 border-purple-500/40 text-purple-300 shadow-[0_0_20px_-6px_rgba(168,85,247,0.4)]'
+                      : isDark ? 'bg-zinc-900/50 border-zinc-700/50 text-zinc-500 hover:border-zinc-600' : 'bg-white/60 border-zinc-300 text-zinc-500 hover:border-zinc-400'}
                 `}
               >
-                {useCloudApi ? (
+                {useCloudApi && cloudPluginAvailable !== false ? (
                   <Cloud className="w-4 h-4" />
                 ) : (
                   <CloudOff className="w-4 h-4" />
                 )}
-                <span>{useCloudApi ? 'Cloud API Ativa' : 'Apenas Análise Local'}</span>
+                <span>
+                  {cloudPluginAvailable === false
+                    ? 'Cloud API Indisponível'
+                    : useCloudApi ? 'Cloud API Ativa' : 'Apenas Análise Local'}
+                </span>
                 <div className={`
                   w-9 h-5 rounded-full transition-colors duration-300 flex items-center px-0.5
-                  ${useCloudApi ? 'bg-purple-500' : 'bg-zinc-700'}
+                  ${useCloudApi && cloudPluginAvailable !== false ? 'bg-purple-500' : 'bg-zinc-700'}
                 `}>
                   <div className={`
                     w-4 h-4 rounded-full bg-white shadow-md transition-transform duration-300
-                    ${useCloudApi ? 'translate-x-4' : 'translate-x-0'}
+                    ${useCloudApi && cloudPluginAvailable !== false ? 'translate-x-4' : 'translate-x-0'}
                   `} />
                 </div>
               </button>
+              {cloudPluginAvailable === false && (
+                <p className="text-xs text-zinc-500 max-w-md text-center">
+                  Sem API key Sightengine no motor — apenas plugins locais ficam ativos.
+                </p>
+              )}
             </div>
 
             {/* Error message */}
