@@ -5,6 +5,7 @@ Descreve as transições possíveis de uma análise (`task_id`) desde a sua cria
 Os estados correspondem ao campo `stage` propagado via SSE em `/api/progress/stream` (ver [main.py](../../engine/main.py)).
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '26px', 'fontFamily': 'Inter, Arial, sans-serif'}, 'stateDiagram': {'padding': 20}}}%%
 stateDiagram-v2
     [*] --> IDLE: Cliente acede ao Dashboard
 

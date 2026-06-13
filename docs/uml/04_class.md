@@ -11,69 +11,57 @@ Por legibilidade e fiabilidade de render, está dividido em dois diagramas:
 ## 1. Hierarquia de plugins
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '22px', 'fontFamily': 'Inter, Arial, sans-serif'}}}%%
 classDiagram
     class BaseDetectorPlugin {
         <<abstract>>
-        +SUPPORTS_BATCH bool
-        +plugin_name() str
-        +plugin_description() str
-        +plugin_version() str
-        +plugin_weight() float
-        +analyze_frame(frame, face_roi) float
-        +analyze_frames_batch(items) list
-        +is_configured() bool
-        +reset() None
-        +get_plugin_info() dict
+        +SUPPORTS_BATCH
+        +plugin_name()
+        +plugin_description()
+        +plugin_version()
+        +plugin_weight()
+        +analyze_frame()
+        +analyze_frames_batch()
+        +is_configured()
+        +reset()
+        +get_plugin_info()
     }
 
     class MesoNetDetectorPlugin {
-        +SUPPORTS_BATCH true
-        +INPUT_SIZE 256
-        -_model
-        -_device
-        -_weights_path
-        +analyze_frame(frame, face_roi) float
-        +analyze_frames_batch(items) list
-        -_preprocess(img)
+        +analyze_frame()
+        +analyze_frames_batch()
+        -_preprocess()
     }
 
     class ViTDetectorPlugin {
-        +SUPPORTS_BATCH true
-        +RAW_LOW 0.50
-        +RAW_HIGH 1.00
-        -_pipe
-        +analyze_frame(frame, face_roi) float
-        +analyze_frames_batch(items) list
-        -_calibrate(raw) float
+        +analyze_frame()
+        +analyze_frames_batch()
+        -_calibrate()
     }
 
     class DCTFrequencyAnalyzerPlugin {
-        +analyze_frame(frame, face_roi) float
-        -_power_law_deviation(gray) float
-        -_stride_artifact_score(gray) float
-        -_spectral_flatness_score(gray) float
+        +analyze_frame()
+        -_power_law_deviation()
+        -_stride_artifact_score()
+        -_spectral_flatness_score()
     }
 
     class EdgeBlendingDetector {
-        +analyze_frame(frame, face_roi) float
-        -_gradient_discontinuity_score(face) float
-        -_color_boundary_score(face) float
-        -_illumination_consistency_score(face) float
+        +analyze_frame()
+        -_gradient_discontinuity_score()
+        -_color_boundary_score()
+        -_illumination_consistency_score()
     }
 
     class PRNUNoiseResidueDetector {
-        +MIN_ROI_SIDE 48
-        +analyze_frame(frame, face_roi) float
-        -_noise_ratio_score(frame, roi) float
-        -_locate_roi(frame, roi) tuple
+        +analyze_frame()
+        -_noise_ratio_score()
+        -_locate_roi()
     }
 
     class SightengineDeepfakeDetector {
-        -_frame_counter int
-        -_cached_score float
-        -_api_configured bool
-        +analyze_frame(frame, face_roi) float
-        +reset() None
+        +analyze_frame()
+        +reset()
     }
 
     BaseDetectorPlugin <|-- MesoNetDetectorPlugin
@@ -89,32 +77,24 @@ classDiagram
 ## 2. Orquestração e analyzers vídeo-level
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '22px', 'fontFamily': 'Inter, Arial, sans-serif'}}}%%
 classDiagram
     class PluginManager {
-        -_plugins list
-        -_preprocessor FacePreProcessor
-        -_analysis_lock Lock
-        +CLOUD_PLUGIN_NAME str
-        +MIN_FACE_AREA_FOR_VERDICT_RATIO 0.03
-        +run_analysis(frames, fps, mode, callback) dict
-        +get_plugins() list
-        -_load_all_plugins() None
-        -_run_analysis_locked(args) dict
+        +run_analysis()
+        +get_plugins()
+        -_load_all_plugins()
+        -_run_analysis_locked()
     }
 
     class FacePreProcessor {
-        -_use_mtcnn bool
-        -_mtcnn MTCNN
-        -_net Net
-        +process(frame) tuple
-        -_process_mtcnn(args) tuple
-        -_process_ssd(args) tuple
+        +process()
+        -_process_mtcnn()
+        -_process_ssd()
     }
 
     class SceneClassifier {
-        +CROPPED_FACE_RATIO_THRESHOLD 0.50
-        +classify(frame, bbox, detected) SceneType
-        +get_active_plugins_and_weights(scene, plugins) list
+        +classify()
+        +get_active_plugins_and_weights()
     }
 
     class SceneType {
@@ -126,38 +106,32 @@ classDiagram
 
     class PluginNames {
         <<constants>>
-        +VIT_DETECTOR str
-        +DCT_FREQUENCY str
-        +EDGE_BLENDING str
-        +SIGHTENGINE_CLOUD str
-        +PRNU_NOISE str
-        +MESONET str
+        VIT_DETECTOR
+        DCT_FREQUENCY
+        EDGE_BLENDING
+        SIGHTENGINE_CLOUD
+        PRNU_NOISE
+        MESONET
     }
 
     class BaseDetectorPlugin {
         <<abstract>>
     }
 
-    class LipSyncAnalyzer {
-        +analyze_video(path) dict
-    }
+    PluginManager o-- BaseDetectorPlugin
+    PluginManager *-- FacePreProcessor
+    PluginManager ..> SceneClassifier
+    SceneClassifier ..> SceneType
+    SceneClassifier ..> PluginNames
+```
 
-    class AudioDeepfakeAnalyzer {
-        +analyze_audio(path) dict
-    }
+---
 
-    class MetadataAnalyzer {
-        +analyze(path) dict
-    }
+## 3. API REST e analyzers vídeo-level
 
-    class TemporalCoherenceAnalyzer {
-        +analyze_frames(frames) dict
-    }
-
-    class rPPGAnalyzer {
-        +analyze_face_track(rois, fps) dict
-    }
-
+```mermaid
+%%{init: {'themeVariables': {'fontSize': '22px', 'fontFamily': 'Inter, Arial, sans-serif'}}}%%
+classDiagram
     class FastAPIApp {
         <<entrypoint>>
         +POST /api/analyze
@@ -168,11 +142,29 @@ classDiagram
         +GET /health
     }
 
-    PluginManager o-- BaseDetectorPlugin
-    PluginManager *-- FacePreProcessor
-    PluginManager ..> SceneClassifier
-    SceneClassifier ..> SceneType
-    SceneClassifier ..> PluginNames
+    class PluginManager {
+        +run_analysis()
+    }
+
+    class LipSyncAnalyzer {
+        +analyze_video()
+    }
+
+    class AudioDeepfakeAnalyzer {
+        +analyze_audio()
+    }
+
+    class MetadataAnalyzer {
+        +analyze()
+    }
+
+    class TemporalCoherenceAnalyzer {
+        +analyze_frames()
+    }
+
+    class rPPGAnalyzer {
+        +analyze_face_track()
+    }
 
     FastAPIApp *-- PluginManager
     FastAPIApp *-- LipSyncAnalyzer

@@ -3,75 +3,83 @@
 Mapeia o fluxo de trabalho do caso de uso **UC1 (Analisar Mídia)**, desde o upload do utilizador até à disponibilização do resultado (Cap. 3.3 do relatório).
 
 ```mermaid
-flowchart TD
-    Start([Utilizador acede ao Dashboard])
-    Upload[Selecciona ficheiro<br/>vídeo ou imagem]
-    POST[POST /api/analyze<br/>multipart/form-data]
+%%{init: {'flowchart': {'curve': 'basis', 'padding': 20, 'nodeSpacing': 50, 'rankSpacing': 60}, 'themeVariables': {'fontSize': '28px', 'fontFamily': 'Inter, Arial, sans-serif'}}}%%
+flowchart TB
+    Start([Utilizador])
+    Upload[Selecciona ficheiro<br/>POST /api/analyze]
 
-    AuthCheck{ENGINE_API_KEYS<br/>definido?}
-    AuthOK{X-API-Key<br/>válido?}
-    Reject401[/HTTP 401<br/>Unauthorized/]
+    subgraph Validacao["Validação síncrona"]
+        direction LR
+        Auth{Auth OK?}
+        Rate{Rate limit?}
+        Size{Size ≤ cap?}
+        Auth -- sim --> Rate
+        Rate -- não --> Size
+    end
 
-    RateCheck{Rate limit<br/>excedido?}
-    Reject429[/HTTP 429<br/>Too Many Requests/]
+    Reject[/HTTP 4xx<br/>401 / 429 / 413/]
 
-    SizeCheck{Tamanho<br/>≤ MAX_UPLOAD_MB?}
-    Reject413[/HTTP 413<br/>Payload Too Large/]
+    SaveTmp[Grava em /tmp<br/>cria task_id]
+    Respond[/HTTP 202<br/>task_id/]
 
-    SaveTmp[Grava em /tmp<br/>cria task_id UUID]
-    Respond[Devolve task_id<br/>HTTP 202]
+    SubscribeSSE[Cliente subscreve SSE]
+    BgStart[Background Task arranca]
 
-    SubscribeSSE[Cliente subscreve<br/>SSE /api/progress/stream]
-
-    BgStart[Background Task<br/>inicia]
     Extract[Extrai frames<br/>cv2.VideoCapture]
+    LoopFrames{Próximo frame?}
 
-    LoopFrames{Próximo<br/>frame?}
+    subgraph FrameLoop["Para cada frame"]
+        direction LR
+        FaceDetect[MTCNN<br/>face detect]
+        SceneClass[SceneClassifier]
+        BatchPath{Batch<br/>elegível?}
+        BatchInfer[analyze_frames_batch<br/>ViT + MesoNet]
+        PerFace[analyze_frame<br/>plugins ativos]
+        Aggregate[MAX faces<br/>por frame]
+        EmitSSE[Emit SSE]
+        FaceDetect --> SceneClass --> BatchPath
+        BatchPath -- sim --> BatchInfer --> PerFace
+        BatchPath -- não --> PerFace
+        PerFace --> Aggregate --> EmitSSE
+    end
 
-    FaceDetect[FacePreProcessor<br/>MTCNN detect]
-    SceneClass[SceneClassifier<br/>classifica cenário]
-    BatchPath{Plugin<br/>SUPPORTS_BATCH<br/>e ≥2 caras?}
-    BatchInfer[analyze_frames_batch<br/>ViT, MesoNet]
-    PerFace[Por cada cara:<br/>analyze_frame plugins ativos]
-    Aggregate[Agrega: MAX<br/>por frame]
-    EmitProgress[Emite progresso<br/>via SSE]
+    subgraph PosAnalise["Pós-análise vídeo-level"]
+        direction LR
+        VideoAnalyzers[Metadata · Temporal<br/>rPPG · LipSync · Audio]
+        FinalScore[overall_score]
+        Persist[Persiste<br/>memória + SQLite]
+        VideoAnalyzers --> FinalScore --> Persist
+    end
 
-    AfterFrames[Termina loop<br/>de frames]
-    VideoAnalyzers[Corre analyzers<br/>de vídeo:<br/>Metadata, Temporal,<br/>rPPG, LipSync, Audio]
-    FinalScore[Calcula overall_score<br/>média dos frames]
-    Persist[Persiste resultado<br/>em memória]
-    NotifyDone[SSE: 'completed']
+    NotifyDone[SSE: completed]
 
-    Inspect[Utilizador inspeciona<br/>frames + bboxes]
-    OptPDF{Gerar PDF?}
-    PDF[Descarrega<br/>relatório PDF]
+    subgraph Cliente["Cliente"]
+        direction LR
+        Inspect[Inspeciona frames<br/>+ bboxes]
+        OptPDF{Gerar PDF?}
+        PDF[Descarrega PDF]
+        Inspect --> OptPDF
+        OptPDF -- sim --> PDF
+    end
+
     End([Fim])
 
-    Start --> Upload --> POST
-    POST --> AuthCheck
-    AuthCheck -- não --> RateCheck
-    AuthCheck -- sim --> AuthOK
-    AuthOK -- não --> Reject401
-    AuthOK -- sim --> RateCheck
-    RateCheck -- sim --> Reject429
-    RateCheck -- não --> SizeCheck
-    SizeCheck -- não --> Reject413
-    SizeCheck -- sim --> SaveTmp
+    Start --> Upload --> Validacao
+    Validacao -- falha --> Reject
+    Validacao -- sucesso --> SaveTmp
     SaveTmp --> Respond
     Respond --> SubscribeSSE
     Respond --> BgStart
 
     BgStart --> Extract --> LoopFrames
-    LoopFrames -- sim --> FaceDetect --> SceneClass --> BatchPath
-    BatchPath -- sim --> BatchInfer --> PerFace
-    BatchPath -- não --> PerFace
-    PerFace --> Aggregate --> EmitProgress --> LoopFrames
-
-    LoopFrames -- não --> AfterFrames --> VideoAnalyzers --> FinalScore --> Persist --> NotifyDone
+    LoopFrames -- sim --> FrameLoop
+    FrameLoop --> LoopFrames
+    LoopFrames -- não --> PosAnalise
+    PosAnalise --> NotifyDone
 
     SubscribeSSE --> NotifyDone
-    NotifyDone --> Inspect --> OptPDF
-    OptPDF -- sim --> PDF --> End
+    NotifyDone --> Cliente
+    Cliente --> End
     OptPDF -- não --> End
 
     classDef startend fill:#a3be8c,stroke:#2e3440,color:#2e3440
@@ -81,10 +89,10 @@ flowchart TD
     classDef async fill:#b48ead,stroke:#2e3440,color:#eceff4
 
     class Start,End startend
-    class AuthCheck,AuthOK,RateCheck,SizeCheck,LoopFrames,BatchPath,OptPDF decision
-    class Reject401,Reject429,Reject413 error
-    class Upload,POST,SaveTmp,Respond,Extract,FaceDetect,SceneClass,PerFace,Aggregate,VideoAnalyzers,FinalScore,Persist,Inspect,PDF action
-    class BgStart,BatchInfer,EmitProgress,NotifyDone,SubscribeSSE async
+    class Auth,Rate,Size,LoopFrames,BatchPath,OptPDF decision
+    class Reject error
+    class Upload,SaveTmp,Respond,Extract,FaceDetect,SceneClass,PerFace,Aggregate,VideoAnalyzers,FinalScore,Persist,Inspect,PDF action
+    class BgStart,BatchInfer,EmitSSE,NotifyDone,SubscribeSSE async
 ```
 
 ## Notas de leitura

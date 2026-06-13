@@ -4,9 +4,9 @@
 
 ### Motor de Deteção Forense v2.0 — Sistema de Plugins
 
-Uma plataforma de análise forense de deepfakes que combina **inteligência artificial visual e áudio** para detetar manipulações em vídeos e imagens, apresentando os resultados num painel interativo com exportação de relatórios PDF.
+Uma plataforma de análise forense de deepfakes que combina **6 detetores visuais** e **5 analisadores ao nível do vídeo** (visual, áudio, metadados, temporal e fisiológico) para detetar manipulações em vídeos e imagens, apresentando os resultados num painel interativo com exportação de relatórios PDF.
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.10–3.11-blue?logo=python&logoColor=white)](https://python.org)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?logo=fastapi)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
@@ -53,14 +53,16 @@ Uma plataforma de análise forense de deepfakes que combina **inteligência arti
 │  │  │ MTCNN + SSD  │  │ 3 tipos cena │  │ plugins/*.py          │ │  │
 │  │  └──────────────┘  └──────────────┘  └───────────────────────┘ │  │
 │  └────────────────────────────────────────────────────────────────┘  │
-│  ┌─────────┐ ┌─────────┐ ┌──────────────┐ ┌──────────────────────┐   │
-│  │   ViT   │ │   DCT   │ │ Edge Blend   │ │  Sightengine (Cloud) │   │
-│  │ 99.27%  │ │ 1/f² law│ │ Face X-ray   │ │  API Rate-Limited    │   │
-│  └─────────┘ └─────────┘ └──────────────┘ └──────────────────────┘   │
-│  ┌─────────────────────────┐  ┌───────────────────────────────────┐  │
-│  │  WavLM Audio Deepfake   │  │  Lip Sync (MediaPipe FaceMesh)    │  │
-│  │  Voice Cloning Detection│  │  Multi-face, 3D Landmarks         │  │
-│  └─────────────────────────┘  └───────────────────────────────────┘  │
+│  6 PLUGINS VISUAIS (por frame, com routing por cena)                  │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────┐ │
+│  │MesoNet │ │  ViT   │ │  DCT   │ │  Edge  │ │  PRNU  │ │Sightengin│ │
+│  │Meso-4  │ │99.27%¹ │ │1/f²law │ │ Blend  │ │ noise  │ │ e (cloud)│ │
+│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘ └──────────┘ │
+│  5 ANALISADORES AO NÍVEL DO VÍDEO (sobre o vídeo inteiro)             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐ │
+│  │ Lip Sync │ │WavLM áudio│ │ Metadata │ │ Temporal │ │   rPPG     │ │
+│  │FaceMesh  │ │voz sintét.│ │EXIF/probe│ │ coerência│ │ pulso card.│ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────────────┘ │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -69,9 +71,9 @@ Uma plataforma de análise forense de deepfakes que combina **inteligência arti
 1. **Upload** — O utilizador arrasta um vídeo/imagem; `POST /api/analyze` aceita o ficheiro, **enfileira** o trabalho em background e devolve o `task_id` imediatamente (worker FastAPI não bloqueia)
 2. **Extração** — FFmpeg extrai frames a 2fps (ou OpenCV como fallback)
 3. **Pré-processamento** — MTCNN deteta faces, SceneClassifier classifica a cena
-4. **Análise Visual** — Plugins processam cada frame com routing por cena. ViT suporta batching quando há ≥2 faces num frame
-5. **Análise Áudio** — WavLM analisa o áudio em **chunks de 10s** (até 3 min); MediaPipe correlaciona áudio/lábios em **janelas deslizantes de 4s** ao longo do vídeo inteiro (até 2 min)
-6. **Scoring** — Veredito final por MAX(visual, áudio); o frontend classifica em 4 categorias (sem evidência / inconclusivo / consistente com manipulação / manipulação altamente provável) em vez de binário
+4. **Análise Visual** — Os 6 plugins processam cada frame com routing por cena (plugins face-condicionais são saltados em cenas sem rosto). ViT e MesoNet suportam batching quando há ≥2 faces num frame
+5. **Análise ao nível do vídeo** — 5 analisadores correm sobre o vídeo inteiro: WavLM analisa o áudio em **chunks de 10s** (até 3 min); MediaPipe correlaciona áudio/lábios em **janelas deslizantes de 4s** (até 2 min); e ainda metadados (EXIF/ffprobe), coerência temporal de landmarks e rPPG (pulsação via canal verde)
+6. **Scoring** — Agregação por cena (média ponderada) → MAX sobre faces → média sobre frames; veredito final por MAX(visual, áudio). O frontend classifica em 4 categorias (sem evidência / inconclusivo / consistente com manipulação / manipulação altamente provável) em vez de binário
 7. **Polling** — Frontend faz polling de `/api/progress`; ao detetar `stage=done` busca `/api/result/{task_id}`
 8. **Dashboard** — Resultados apresentados com gráficos, timeline, bounding boxes, e métricas separadas
 
@@ -79,43 +81,58 @@ Uma plataforma de análise forense de deepfakes que combina **inteligência arti
 
 ## 🔌 Plugins & Modelos
 
-| Plugin | Técnica | Modelo/Base | Peso |
-|--------|---------|-------------|------|
-| **ViT Detector** | Vision Transformer fine-tuned em 140K+ imagens fake/real | `dima806/deepfake_vs_real_image_detection` (99.27% in-distribution¹) | 0.60 |
-| **DCT Frequency Analyzer** | Análise espectral FFT — desvio da lei 1/f², artefactos de stride, spectral flatness | Baseado em física (sem ML) | 0.25 |
-| **Edge Blending Detector** | Descontinuidades de gradiente, shifts de cor HSV, inconsistências de iluminação na fronteira da face | Inspirado em *Face X-ray* (Li et al., CVPR 2020) | 0.15 |
-| **Sightengine Cloud** | API cloud comercial com deteção de AI-generated content | Sightengine API (rate-limited) | Variável |
-| **WavLM Audio** | Deteção de voz sintética (clonagem de voz AI) — chunks de 10s ao longo do vídeo | `abhishtagatya/wavlm-base-960h-itw-deepfake` | — |
-| **Lip Sync (MediaPipe)** | Correlação entre energia áudio e abertura labial via FaceMesh 3D em janelas deslizantes de 4s | MediaPipe FaceMesh (478 landmarks) | — |
+### 6 plugins visuais (por frame)
+
+| Plugin | Técnica | Modelo/Base |
+|--------|---------|-------------|
+| **MesoNet** | CNN compacta (~30K params) purpose-trained para deteção de face-swap; opera na escala mesoscópica | Meso-4 (Afchar et al., WIFS 2018), pesos Keras convertidos para PyTorch |
+| **ViT Detector** | Vision Transformer fine-tuned em 140K+ imagens fake/real | `dima806/deepfake_vs_real_image_detection` (99.27% in-distribution¹) |
+| **DCT Frequency Analyzer** | Análise espectral FFT — desvio da lei 1/f², artefactos de stride, spectral flatness | Baseado em física (sem ML) |
+| **Edge Blending Detector** | Descontinuidades de gradiente, shifts de cor HSV, inconsistências de iluminação na fronteira da face | Inspirado em *Face X-ray* (Li et al., CVPR 2020) |
+| **PRNU Noise Detector** | Variância de ruído residual com high-pass Gaussiano (proxy single-frame do PRNU clássico) | Baseado em física (sem ML) |
+| **Sightengine Cloud** | API cloud comercial com deteção de AI-generated content (opcional, rate-limited) | Sightengine API |
 
 > **¹ Sobre o 99.27%**: é a accuracy reportada pelo autor do modelo no **dataset de treino**. Em dados out-of-distribution (vídeos comprimidos, deepfakes de métodos novos, demografias sub-representadas) o número cai. Ver [`BENCHMARKS.md`](BENCHMARKS.md) para resultados medidos em datasets públicos.
 
+### 5 analisadores ao nível do vídeo
+
+| Analisador | Técnica | Modelo/Base |
+|------------|---------|-------------|
+| **Lip Sync** | Correlação entre energia áudio (STFT) e abertura labial via FaceMesh 3D em janelas deslizantes de 4s | MediaPipe FaceMesh (478 landmarks) |
+| **WavLM Audio** | Deteção de voz sintética (clonagem de voz AI) — chunks de 10s ao longo do vídeo | `abhishtagatya/wavlm-base-960h-itw-deepfake` |
+| **Metadata** | Inspeção de EXIF (imagens) e ffprobe (vídeos) para inconsistências de codec/encoding | Heurístico |
+| **Temporal Coherence** | Instabilidade temporal de landmarks faciais entre frames consecutivos | Heurístico |
+| **rPPG** | Deteção de pulsação cardíaca via oscilação periódica do canal verde do rosto | Inspirado em *FakeCatcher* (Ciftci et al., 2020) |
+
 ### Routing por cena
 
-| Cena | Detetada quando… | Plugins ativos | Pesos |
-|---|---|---|---|
-| `CROPPED_FACE` | Face ≥ 50% do frame | ViT + DCT + Edge + Sightengine | 0.30 + 0.15 + 0.20 + 0.35 |
-| `FACE_IN_SCENE` | Face detetada mas < 50% do frame | ViT + DCT + Edge + Sightengine | 0.30 + 0.15 + 0.25 + 0.30 |
-| `NO_FACE` | Nenhuma face detetada | DCT + Sightengine (ViT **excluído**: é classificador de face) | 0.50 + 0.50 |
+Os pesos por cena estão definidos em [`engine/core/scene_classifier.py`](engine/core/scene_classifier.py) e somam 1.0 por cena. Plugins não listados para uma cena são **saltados** (não executados).
+
+| Cena | Detetada quando… | Plugins ativos (peso) |
+|---|---|---|
+| `CROPPED_FACE` | Face ≥ 50% do frame | MesoNet 0.40 · Sightengine 0.20 · ViT 0.18 · DCT 0.10 · Edge 0.07 · PRNU 0.05 |
+| `FACE_IN_SCENE` | Face detetada mas < 50% do frame | MesoNet 0.38 · Sightengine 0.18 · ViT 0.18 · DCT 0.10 · Edge 0.09 · PRNU 0.07 |
+| `NO_FACE` | Nenhuma face detetada | DCT 0.50 · Sightengine 0.50 (MesoNet, ViT, Edge e PRNU **excluídos**: precisam de uma face) |
 
 ---
 
 ## ✨ Funcionalidades
 
 - 🎯 **Análise multi-face** — Deteta e analisa até 6 caras por frame; caras < 3% do frame são mostradas mas **não influenciam o veredito** (evitam falsos positivos por scores ruidosos em faces pequenas)
-- 🧠 **4 plugins visuais** complementares (ML + física + cloud) com auto-discovery
-- 🎙️ **Análise de áudio** — WavLM em chunks de 10s + MediaPipe em janelas deslizantes de 4s (cobertura do vídeo inteiro, não apenas os primeiros segundos)
+- 🧠 **6 plugins visuais** complementares (ML + física + cloud) com auto-discovery
+- 🎬 **5 analisadores de vídeo** — lip-sync, voz sintética (WavLM), metadados, coerência temporal e rPPG, cobrindo o vídeo inteiro
 - 📊 **Dashboard interativo** — Gráfico temporal, timeline de frames, bounding boxes com canvas overlay
 - 📄 **Exportação PDF** — Relatório forense completo com tabelas e métricas
+- 🗃️ **Histórico persistente** — Cada análise é guardada em SQLite local (`~/.deepfake-forensics/history.db`), com vista dedicada (`/historico`) e endpoints REST CRUD
 - ⏳ **Endpoint assíncrono** — `POST /api/analyze` enfileira e devolve `task_id`; worker FastAPI fica livre para outros pedidos enquanto a análise corre
 - 🚦 **4 categorias de veredito** — sem evidência / inconclusivo / consistente com manipulação / manipulação altamente provável (não apenas binário)
 - 🌗 **Dark/Light mode** — Toggle com persistência em localStorage
 - 🔄 **Batch Analyzer** — CLI multi-threaded com confusion matrix, F1-Score, MCC
-- 📈 **Benchmark script** — `engine/benchmark.py` corre o motor sobre datasets rotulados e emite AUC/F1 por plugin
+- 📈 **Benchmark script** — `engine/benchmark.py` corre o motor sobre datasets rotulados e emite AUC/F1 por plugin, com intervalos de confiança a 95% via bootstrap
 - 🎯 **Scene-aware routing** — Plugins são ativados apenas quando relevantes (CROPPED_FACE, FACE_IN_SCENE, NO_FACE)
 - ⚡ **Worst-case scoring** — `MAX(visual, audio)` garante que nenhuma manipulação escapa
 - 🔒 **Auth + rate-limit + upload cap** — `X-API-Key` opcional, 10 req/min por cliente, upload ≤ 200 MB (configuráveis)
-- ✅ **Suite de testes** — 38 unit tests cobrem scene routing, DCT, lip sync logic e os bugs de regressão críticos
+- ✅ **Suite de testes** — 82 unit tests cobrem scene routing, DCT, MesoNet, lip sync logic, ciclo de vida dos plugins, history store e os bugs de regressão críticos
 
 ---
 
@@ -236,7 +253,7 @@ Tecla **P** para pausar/retomar o lote durante a execução.
 .venv/Scripts/python.exe -m pytest engine/tests -v
 ```
 
-Cobertura atual: **38 testes** sobre `SceneClassifier` (geometria + integridade das tabelas de pesos), `DCTFrequencyAnalyzer` (incluindo regressão da regressão linear), `LipSyncAnalyzer` (correlação áudio↔boca em vários cenários), e ciclo de vida dos plugins (reset, propagação de `face_roi=None`, filtro multi-face).
+Cobertura atual: **82 testes** sobre `SceneClassifier` (geometria + integridade das tabelas de pesos), `DCTFrequencyAnalyzer` (incluindo regressão da regressão linear), `MesoNetDetector` (carregamento de pesos + flatten order), `LipSyncAnalyzer` (correlação áudio↔boca em vários cenários), ciclo de vida dos plugins (reset, propagação de `face_roi=None`, filtro multi-face), os analisadores de vídeo, e o `history_store` (SQLite CRUD).
 
 ### Benchmark de accuracy em dataset rotulado
 
@@ -284,22 +301,28 @@ Resultados publicados (quando disponíveis) em [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ## 📚 Referências Académicas
 
-1. **Face X-ray for More General Face Forgery Detection** — Li, L. et al., CVPR 2020
+1. **MesoNet: a Compact Facial Video Forgery Detection Network** — Afchar, D. et al., IEEE WIFS 2018
+   - *Arquitetura Meso-4 usada no plugin principal de deteção visual*
+
+2. **Face X-ray for More General Face Forgery Detection** — Li, L. et al., CVPR 2020
    - *Base teórica para o plugin Edge Blending Boundary Detector*
 
-2. **WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing** — Chen, S. et al., IEEE JSTSP 2022
+3. **FakeCatcher: Detection of Synthetic Portrait Videos using Biological Signals** — Ciftci, U. A. et al., IEEE TPAMI 2020
+   - *Base teórica para o analisador rPPG (pulsação cardíaca)*
+
+4. **WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing** — Chen, S. et al., IEEE JSTSP 2022
    - *Modelo usado para deteção de clonagem de voz (WavLM-base-960h)*
 
-3. **An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale** — Dosovitskiy, A. et al., ICLR 2021
-   - *Arquitetura ViT usada no plugin principal de deteção visual*
+5. **An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale** — Dosovitskiy, A. et al., ICLR 2021
+   - *Arquitetura ViT usada num dos plugins de deteção visual*
 
-4. **MediaPipe Face Mesh** — Kartynnik, Y. et al., Google Research, 2019
+6. **MediaPipe Face Mesh** — Kartynnik, Y. et al., Google Research, 2019
    - *478 pontos faciais 3D usados para análise de sincronia labial*
 
-5. **1/f Noise and Statistical Properties of Natural Images** — Field, D.J., 1987
+7. **Modelling the Power Spectra of Natural Images: Statistics and Information** — van der Schaaf, A. & van Hateren, J.H., Vision Research, 1996
    - *Fundamentação da lei 1/f² usada no plugin DCT Frequency Analyzer*
 
-6. **FaceForensics++: Learning to Detect Manipulated Facial Images** — Rössler, A. et al., ICCV 2019
+8. **FaceForensics++: Learning to Detect Manipulated Facial Images** — Rössler, A. et al., ICCV 2019
    - *Dataset de referência para validação do sistema de deteção*
 
 ---
