@@ -33,15 +33,15 @@ Uma plataforma de análise forense de deepfakes que combina **6 detetores visuai
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                          Frontend (Next.js)                         │
-│  ┌──────────┐   ┌──────────────────┐   ┌──────────────────────────┐ │
-│  │  Upload   │   │ ReportDashboard  │   │ VideoForensicsPlayer     │ │
-│  │  + D&D    │   │ Scores + Charts  │   │ Frame viewer + BBoxes    │ │
-│  └──────────┘   └──────────────────┘   └──────────────────────────┘ │
-│         │                ▲                          ▲               │
-│         │     Progress   │         Frame Cache      │               │
-│         │     Polling    │         /api/frame        │               │
-│         ▼                │                          │               │
+│                          Frontend (Next.js)                          │
+│  ┌──────────┐   ┌──────────────────┐   ┌──────────────────────────┐  │
+│  │  Upload   │   │ ReportDashboard │   │ VideoForensicsPlayer     │  │
+│  │  + D&D    │   │ Scores + Charts │   │ Frame viewer + BBoxes    │  │
+│  └──────────┘   └──────────────────┘   └──────────────────────────┘  │
+│         │                ▲                          ▲                │
+│         │     Progress   │         Frame Cache      │                │
+│         │     Polling    │         /api/frame       │                │
+│         ▼                │                          │                │
 ├──────────────────────────────────────────────────────────────────────┤
 │                     POST /api/analyze                                │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -53,16 +53,16 @@ Uma plataforma de análise forense de deepfakes que combina **6 detetores visuai
 │  │  │ MTCNN + SSD  │  │ 3 tipos cena │  │ plugins/*.py          │ │  │
 │  │  └──────────────┘  └──────────────┘  └───────────────────────┘ │  │
 │  └────────────────────────────────────────────────────────────────┘  │
-│  6 PLUGINS VISUAIS (por frame, com routing por cena)                  │
+│  6 PLUGINS VISUAIS (por frame, com routing por cena)                 │
 │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────┐ │
 │  │MesoNet │ │  ViT   │ │  DCT   │ │  Edge  │ │  PRNU  │ │Sightengin│ │
 │  │Meso-4  │ │99.27%¹ │ │1/f²law │ │ Blend  │ │ noise  │ │ e (cloud)│ │
 │  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘ └──────────┘ │
-│  5 ANALISADORES AO NÍVEL DO VÍDEO (sobre o vídeo inteiro)             │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐ │
-│  │ Lip Sync │ │WavLM áudio│ │ Metadata │ │ Temporal │ │   rPPG     │ │
-│  │FaceMesh  │ │voz sintét.│ │EXIF/probe│ │ coerência│ │ pulso card.│ │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────────────┘ │
+│  5 ANALISADORES AO NÍVEL DO VÍDEO (sobre o vídeo inteiro)            │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐  │
+│  │ Lip Sync │ │WavLM áudio││ Metadata │ │ Temporal │ │   rPPG     │  │
+│  │FaceMesh  │ │voz sintét.││EXIF/probe│ │ coerência│ │ pulso card.│  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────────────┘  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
